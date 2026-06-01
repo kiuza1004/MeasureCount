@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<title>MeasureCount</title>
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --fg: #ffffff;
+    --accent: #34d399;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --panel: rgba(0, 0, 0, 0.55);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+    background: #000;
+  }
+  #video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #overlay {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #touchLayer {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    background: transparent;
+  }
+  /* Top tab bar */
+  .tabs {
+    position: absolute; top: env(safe-area-inset-top, 0);
+    left: 0; right: 0;
+    display: flex; justify-content: center;
+    padding: 8px 12px;
+    gap: 8px;
+    z-index: 20;
+  }
+  .tab {
+    flex: 1; max-width: 220px;
+    padding: 10px 12px;
+    border-radius: 999px;
+    background: var(--panel);
+    color: #ddd;
+    text-align: center;
+    font-size: 14px; font-weight: 600;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    user-select: none;
+  }
+  .tab.active {
+    background: var(--accent);
+    color: #002b1c;
+    border-color: transparent;
+  }
+  /* Info HUD */
+  .hud {
+    position: absolute; top: calc(env(safe-area-inset-top, 0) + 56px);
+    left: 12px; right: 12px;
+    z-index: 15;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .pill {
+    align-self: flex-start;
+    background: var(--panel);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .pill.warn { color: #ffd591; border-color: rgba(245,158,11,0.35); }
+  .pill.bad  { color: #ffb4b4; border-color: rgba(239,68,68,0.35); }
+  /* Bottom control panel */
+  .controls {
+    position: absolute; left: 0; right: 0;
+    bottom: env(safe-area-inset-bottom, 0);
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+    z-index: 15;
+  }
+  .row {
+    display: flex; gap: 8px; align-items: center; justify-content: center;
+  }
+  .btn {
+    flex: 1;
+    padding: 14px 12px;
+    border-radius: 14px;
+    background: var(--panel);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.12);
+    font-size: 15px; font-weight: 600;
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+    user-select: none;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary {
+    background: var(--accent); color: #002b1c; border-color: transparent;
+  }
+  .btn.danger {
+    background: var(--danger); color: #fff; border-color: transparent;
+  }
+  .btn.ghost { background: transparent; }
+  .field {
+    flex: 1;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel);
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(8px);
+    font-size: 13px;
+  }
+  .field input {
+    width: 80px;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 15px;
+    text-align: right;
+    outline: none;
+  }
+  .field label { color: #cfcfcf; }
+  /* Loading overlay */
+  #loader {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.8);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 30;
+    color: #fff;
+    font-size: 16px;
+  }
+  #loader.visible { display: flex; }
+  .spinner {
+    width: 22px; height: 22px;
+    border: 3px solid rgba(255,255,255,0.25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    margin-right: 10px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Hidden by default */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <video id="video" autoplay muted playsinline webkit-playsinline></video>
+    <canvas id="overlay"></canvas>
+    <div id="touchLayer"></div>
+
+    <div class="tabs">
+      <div class="tab active" data-mode="measure">거리/넓이 측정</div>
+      <div class="tab" data-mode="count">물건 개수 세기</div>
+    </div>
+
+    <div class="hud">
+      <div class="pill" id="statusPill">초기화 중…</div>
+      <div class="pill" id="resultPill" style="display:none;"></div>
+    </div>
+
+    <!-- Measure controls -->
+    <div class="controls" id="measureControls">
+      <div class="row">
+        <div class="field">
+          <label>카메라 높이(m)</label>
+          <input id="camHeight" type="number" step="0.05" min="0.3" max="3" value="1.50" />
+        </div>
+        <button class="btn ghost" id="orientPermBtn" style="display:none;">기울기 권한 요청</button>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="markBtn">시작점 찍기</button>
+        <button class="btn" id="resetBtn">초기화</button>
+      </div>
+    </div>
+
+    <!-- Count controls -->
+    <div class="controls hidden" id="countControls">
+      <div class="row">
+        <button class="btn" id="toggleDetectBtn">탐지 일시정지</button>
+      </div>
+    </div>
+
+    <div id="loader"><div class="spinner"></div><span id="loaderText">로딩 중…</span></div>
+  </div>
+
+<!-- TensorFlow.js + COCO-SSD via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------- DOM ---------- */
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("overlay");
+  const ctx = canvas.getContext("2d");
+  const touchLayer = document.getElementById("touchLayer");
+  const tabs = document.querySelectorAll(".tab");
+  const statusPill = document.getElementById("statusPill");
+  const resultPill = document.getElementById("resultPill");
+  const loader = document.getElementById("loader");
+  const loaderText = document.getElementById("loaderText");
+  const measureControls = document.getElementById("measureControls");
+  const countControls = document.getElementById("countControls");
+  const camHeightInput = document.getElementById("camHeight");
+  const markBtn = document.getElementById("markBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const orientPermBtn = document.getElementById("orientPermBtn");
+  const toggleDetectBtn = document.getElementById("toggleDetectBtn");
+
+  /* ---------- State ---------- */
+  const state = {
+    mode: "measure",          // "measure" | "count"
+    stream: null,
+    cssW: 0, cssH: 0, dpr: 1,
+    orient: { alpha: null, beta: null, gamma: null, absolute: false },
+    haveOrientation: false,
+    points: [],               // array of {x, z} in meters (ground plane)
+    cocoModel: null,
+    detections: [],
+    detecting: true,
+    rafId: null,
+  };
+
+  /* ---------- Utility ---------- */
+  const showLoader = (text) => {
+    loaderText.textContent = text;
+    loader.classList.add("visible");
+  };
+  const hideLoader = () => loader.classList.remove("visible");
+
+  const setStatus = (text, level) => {
+    statusPill.textContent = text;
+    statusPill.classList.remove("warn", "bad");
+    if (level === "warn") statusPill.classList.add("warn");
+    if (level === "bad") statusPill.classList.add("bad");
+  };
+
+  const setResult = (text) => {
+    if (!text) {
+      resultPill.style.display = "none";
+      resultPill.textContent = "";
+    } else {
+      resultPill.style.display = "";
+      resultPill.textContent = text;
+    }
+  };
+
+  const deg2rad = (d) => d * Math.PI / 180;
+
+  /* ---------- Camera ---------- */
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("이 브라우저는 카메라(getUserMedia)를 지원하지 않습니다.");
+      throw new Error("getUserMedia unsupported");
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width:  { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      state.stream = stream;
+      video.srcObject = stream;
+      await new Promise((resolve) => {
+        if (video.readyState >= 2) return resolve();
+        video.onloadedmetadata = () => resolve();
+      });
+      await video.play().catch(() => {});
+    } catch (err) {
+      console.error(err);
+      if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+        alert("카메라 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해 주세요.");
+      } else if (err && err.name === "NotFoundError") {
+        alert("사용 가능한 카메라를 찾지 못했습니다.");
+      } else {
+        alert("카메라를 시작할 수 없습니다: " + (err && err.message ? err.message : err));
+      }
+      throw err;
+    }
+  }
+
+  /* ---------- Canvas sizing ---------- */
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    state.cssW = rect.width;
+    state.cssH = rect.height;
+    state.dpr = dpr;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const resizeObserver = new ResizeObserver(resizeCanvas);
+  resizeObserver.observe(canvas);
+  window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 200));
+  window.addEventListener("resize", resizeCanvas);
+
+  /* ---------- Device Orientation ---------- */
+  function onDeviceOrientation(ev) {
+    state.orient.alpha = ev.alpha;
+    state.orient.beta  = ev.beta;
+    state.orient.gamma = ev.gamma;
+    state.orient.absolute = !!ev.absolute;
+    state.haveOrientation = (ev.beta !== null);
+  }
+  function attachOrientationListener() {
+    window.addEventListener("deviceorientation", onDeviceOrientation, true);
+  }
+  async function ensureOrientationPermission() {
+    const D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === "function") {
+      try {
+        const res = await D.requestPermission();
+        if (res === "granted") {
+          attachOrientationListener();
+          orientPermBtn.style.display = "none";
+          return true;
+        } else {
+          alert("기기 방향 권한이 거부되었습니다. 거리 측정을 사용할 수 없습니다.");
+          return false;
+        }
+      } catch (e) {
+        console.warn(e);
+        return false;
+      }
+    } else {
+      attachOrientationListener();
+      return true;
+    }
+  }
+
+  /* ---------- Measurement math ----------
+     We assume the camera is held at height h above a flat ground plane,
+     the screen center (reticle) is aimed at the ground point of interest.
+     - beta  (β): pitch around X axis. 0° = device flat (screen up). 90° = upright.
+                  We treat the camera "look" direction tilt below horizontal as
+                  tilt = (β - 90°). For a downward look, tilt is positive (deg).
+     - alpha (α): compass heading around Z axis (0..360). Used as yaw.
+     Then horizontal distance from camera vertical axis to aim point:
+         d = h / tan(tilt)
+     Ground coordinates (meters):
+         x = d * sin(α_rad)
+         z = d * cos(α_rad)
+     Distance between two points = Euclidean in (x, z).
+  ----------------------------------------- */
+  function computeAimGroundPoint() {
+    if (!state.haveOrientation) return null;
+    const h = parseFloat(camHeightInput.value);
+    if (!isFinite(h) || h <= 0) return null;
+    const beta = state.orient.beta;
+    const alpha = state.orient.alpha;
+    if (beta === null || alpha === null) return null;
+
+    const tiltDeg = beta - 90; // angle below horizontal when device is held upright & pointing down
+    if (tiltDeg <= 0.5) return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
+    if (tiltDeg >= 89.5) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
+
+    const d = h / Math.tan(deg2rad(tiltDeg));
+    const a = deg2rad(alpha || 0);
+    return { x: d * Math.sin(a), z: d * Math.cos(a), d };
+  }
+
+  function formatLength(m) {
+    if (m < 1) return (m * 100).toFixed(1) + " cm";
+    return m.toFixed(2) + " m";
+  }
+
+  function polygonArea(points) {
+    // Shoelace on (x, z) plane
+    let s = 0;
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const a = points[i];
+      const b = points[(i + 1) % n];
+      s += (a.x * b.z) - (b.x * a.z);
+    }
+    return Math.abs(s) * 0.5;
+  }
+
+  function updateMeasureHUD() {
+    const aim = computeAimGroundPoint();
+    if (!state.haveOrientation) {
+      setStatus("기기 방향 데이터 없음. 권한을 허용하거나 기기를 움직여 보세요.", "warn");
+    } else if (aim && aim.invalid) {
+      setStatus(aim.invalid, "warn");
+    } else if (aim) {
+      setStatus(`조준 거리 ≈ ${formatLength(aim.d)}`);
+    }
+
+    if (state.points.length === 0) {
+      setResult("");
+    } else if (state.points.length === 1) {
+      setResult("시작점 설정됨. 다음 점을 조준하고 버튼을 누르세요.");
+    } else if (state.points.length === 2) {
+      const [a, b] = state.points;
+      const dist = Math.hypot(a.x - b.x, a.z - b.z);
+      setResult(`거리: ${formatLength(dist)}`);
+    } else {
+      const area = polygonArea(state.points);
+      let perim = 0;
+      for (let i = 0; i < state.points.length; i++) {
+        const a = state.points[i];
+        const b = state.points[(i + 1) % state.points.length];
+        perim += Math.hypot(a.x - b.x, a.z - b.z);
+      }
+      setResult(`넓이: ${area.toFixed(2)} m² · 둘레: ${formatLength(perim)} (${state.points.length}점)`);
+    }
+  }
+
+  /* ---------- Drawing ---------- */
+  function drawReticle() {
+    const cx = state.cssW / 2;
+    const cy = state.cssH / 2;
+    ctx.save();
+    ctx.strokeStyle = "rgba(52, 211, 153, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, cy); ctx.lineTo(cx - 6, cy);
+    ctx.moveTo(cx + 6, cy);  ctx.lineTo(cx + 22, cy);
+    ctx.moveTo(cx, cy - 22); ctx.lineTo(cx, cy - 6);
+    ctx.moveTo(cx, cy + 6);  ctx.lineTo(cx, cy + 22);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMeasureMarkers() {
+    // Project points to screen for visualization.
+    // We render captured points as a small dot on the screen at the position
+    // they were captured. Since we don't have full 3D projection back to screen
+    // continuously, we instead show indices in the top-left corner stack and
+    // a connecting polyline only when 2+ points exist (in screen-anchored layout).
+    // For clarity, show captured points as small chips below the reticle.
+    const cx = state.cssW / 2;
+    const cy = state.cssH / 2 + 40;
+    state.points.forEach((p, i) => {
+      const xOff = (i - (state.points.length - 1) / 2) * 36;
+      const x = cx + xOff;
+      const y = cy;
+      ctx.save();
+      ctx.fillStyle = "rgba(52, 211, 153, 0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#002b1c";
+      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(i + 1), x, y);
+      ctx.restore();
+    });
+  }
+
+  function drawDetections() {
+    if (!state.detections || state.detections.length === 0) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    // The video uses object-fit: cover. Compute scale + offsets accordingly.
+    const cw = state.cssW, ch = state.cssH;
+    const scale = Math.max(cw / vw, ch / vh);
+    const dw = vw * scale, dh = vh * scale;
+    const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.font = "bold 13px sans-serif";
+    ctx.textBaseline = "top";
+    state.detections.forEach((d) => {
+      const [x, y, w, h] = d.bbox;
+      const sx = x * scale + ox;
+      const sy = y * scale + oy;
+      const sw = w * scale, sh = h * scale;
+      ctx.strokeStyle = "rgba(52, 211, 153, 0.95)";
+      ctx.strokeRect(sx, sy, sw, sh);
+      const label = `${d.class} ${(d.score * 100).toFixed(0)}%`;
+      const tw = ctx.measureText(label).width + 8;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(sx, Math.max(0, sy - 18), tw, 18);
+      ctx.fillStyle = "#34d399";
+      ctx.fillText(label, sx + 4, Math.max(0, sy - 16));
+    });
+    ctx.restore();
+  }
+
+  function renderFrame() {
+    ctx.clearRect(0, 0, state.cssW, state.cssH);
+    if (state.mode === "measure") {
+      drawReticle();
+      drawMeasureMarkers();
+      updateMeasureHUD();
+    } else {
+      drawDetections();
+      const n = state.detections ? state.detections.length : 0;
+      setStatus(`탐지된 사물 수: ${n}`);
+    }
+    state.rafId = requestAnimationFrame(renderFrame);
+  }
+
+  /* ---------- Detection loop (decoupled from render) ---------- */
+  let detectBusy = false;
+  async function detectLoop() {
+    if (state.mode !== "count" || !state.detecting || !state.cocoModel) {
+      return setTimeout(detectLoop, 200);
+    }
+    if (!detectBusy && video.readyState >= 2) {
+      detectBusy = true;
+      try {
+        const preds = await state.cocoModel.detect(video, 20, 0.5);
+        state.detections = preds;
+      } catch (e) {
+        console.warn("detect error", e);
+      } finally {
+        detectBusy = false;
+      }
+    }
+    setTimeout(detectLoop, 100); // ~10fps detection
+  }
+
+  /* ---------- Tab switching ---------- */
+  function setMode(mode) {
+    if (state.mode === mode) return;
+    state.mode = mode;
+    tabs.forEach((t) => t.classList.toggle("active", t.dataset.mode === mode));
+    if (mode === "measure") {
+      measureControls.classList.remove("hidden");
+      countControls.classList.add("hidden");
+      state.detections = [];
+      setResult("");
+    } else {
+      measureControls.classList.add("hidden");
+      countControls.classList.remove("hidden");
+      setResult("");
+      if (!state.cocoModel) loadCocoModel();
+    }
+  }
+  tabs.forEach((t) => t.addEventListener("click", () => setMode(t.dataset.mode)));
+
+  /* ---------- Measure controls ---------- */
+  function markPoint() {
+    if (state.mode !== "measure") return;
+    if (!state.haveOrientation) {
+      alert("기기 방향 데이터를 사용할 수 없습니다. 권한을 허용했는지 확인하세요.");
+      return;
+    }
+    const aim = computeAimGroundPoint();
+    if (!aim || aim.invalid) {
+      alert(aim && aim.invalid ? aim.invalid : "유효한 조준 좌표를 계산할 수 없습니다.");
+      return;
+    }
+    state.points.push({ x: aim.x, z: aim.z });
+    updateMarkBtn();
+  }
+  function updateMarkBtn() {
+    const n = state.points.length;
+    if (n === 0) markBtn.textContent = "시작점 찍기";
+    else if (n === 1) markBtn.textContent = "끝점 찍기 (거리)";
+    else markBtn.textContent = `점 추가 (현재 ${n}개·넓이)`;
+  }
+  markBtn.addEventListener("click", markPoint);
+  resetBtn.addEventListener("click", () => {
+    state.points = [];
+    updateMarkBtn();
+    setResult("");
+  });
+
+  // Tap on screen also marks a point in measure mode
+  touchLayer.addEventListener("click", (e) => {
+    if (state.mode === "measure") markPoint();
+  });
+
+  /* ---------- Count controls ---------- */
+  toggleDetectBtn.addEventListener("click", () => {
+    state.detecting = !state.detecting;
+    toggleDetectBtn.textContent = state.detecting ? "탐지 일시정지" : "탐지 재개";
+    if (!state.detecting) state.detections = [];
+  });
+
+  /* ---------- COCO-SSD ---------- */
+  async function loadCocoModel() {
+    if (state.cocoModel) return;
+    if (!window.cocoSsd) {
+      alert("COCO-SSD 라이브러리를 불러오지 못했습니다. 네트워크 상태를 확인하세요.");
+      return;
+    }
+    try {
+      showLoader("AI 모델 로딩 중… (최초 1회)");
+      await tf.ready();
+      state.cocoModel = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+      hideLoader();
+      detectLoop();
+    } catch (e) {
+      hideLoader();
+      console.error(e);
+      alert("모델 로딩 실패: " + (e && e.message ? e.message : e));
+    }
+  }
+
+  /* ---------- iOS orientation permission button ---------- */
+  const needsOrientPerm = (window.DeviceOrientationEvent &&
+                          typeof window.DeviceOrientationEvent.requestPermission === "function");
+  if (needsOrientPerm) {
+    orientPermBtn.style.display = "";
+    orientPermBtn.addEventListener("click", ensureOrientationPermission);
+  } else {
+    attachOrientationListener();
+  }
+
+  /* ---------- Boot ---------- */
+  async function boot() {
+    try {
+      showLoader("카메라 시작 중…");
+      await startCamera();
+      resizeCanvas();
+      hideLoader();
+      setStatus("준비 완료. 카메라 높이를 입력하고 지면을 조준해 시작점을 찍으세요.");
+      updateMarkBtn();
+      renderFrame();
+    } catch (e) {
+      hideLoader();
+      setStatus("카메라를 사용할 수 없습니다.", "bad");
+    }
+  }
+
+  // Prevent double-tap zoom & pinch on iOS
+  document.addEventListener("gesturestart", (e) => e.preventDefault());
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (state.rafId) cancelAnimationFrame(state.rafId);
+      state.rafId = null;
+    } else {
+      if (!state.rafId) renderFrame();
+    }
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>
