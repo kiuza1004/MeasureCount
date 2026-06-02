@@ -248,6 +248,32 @@
   }
   .fieldBtn:active { transform: scale(0.96); }
 
+  .sliderField {
+    flex: 1;
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--panel);
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+    min-height: 44px;
+    justify-content: center;
+  }
+  .sliderLabel {
+    display: flex; justify-content: space-between;
+    font-size: 12px;
+    color: #cfcfcf;
+  }
+  .sliderLabel .val {
+    color: var(--accent);
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .sliderField input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+
   /* ===================== Manual modal ===================== */
   #manualModal {
     position: fixed; inset: 0;
@@ -388,6 +414,15 @@
     <!-- Count controls -->
     <div class="controls" id="countControls" hidden>
       <div class="row">
+        <div class="sliderField">
+          <div class="sliderLabel">
+            <span>탐지 임계값</span>
+            <span class="val" id="confValue">0.50</span>
+          </div>
+          <input id="confSlider" type="range" min="0.30" max="0.75" step="0.05" value="0.50" />
+        </div>
+      </div>
+      <div class="row">
         <button class="btn primary" id="targetResetBtn" type="button" hidden>대상 해제</button>
         <button class="btn" id="toggleDetectBtn" type="button">탐지 일시정지</button>
       </div>
@@ -471,6 +506,8 @@
   const orientPermBtn = $("orientPermBtn");
   const toggleDetectBtn = $("toggleDetectBtn");
   const targetResetBtn = $("targetResetBtn");
+  const confSlider = $("confSlider");
+  const confValue = $("confValue");
   const backBtn = $("backBtn");
   const helpBtn = $("helpBtn");
   const debugBtn = $("debugBtn");
@@ -495,6 +532,8 @@
     detections: [],
     detecting: true,
     targetClass: null,               // count 모드에서 잠근 대상 클래스
+    confidence: 0.5,                 // 카운트 모드 탐지 신뢰도 임계
+    aimBuffer: [],                   // 최근 카메라 방향 벡터 샘플 (시간 윈도우 평균용)
     rafId: null,
     detectTimer: null,
   };
@@ -575,6 +614,18 @@
     state.orient.beta  = ev.beta;
     state.orient.gamma = ev.gamma;
     state.haveOrientation = (ev.beta !== null);
+    // 측정 모드일 때만 카메라 벡터 샘플을 버퍼에 적재 (1초 윈도우)
+    if (state.mode === "measure" || state.mode === "distance") {
+      const v = getCameraVector();
+      if (v) {
+        const now = performance.now();
+        state.aimBuffer.push({ t: now, vx: v.vx, vy: v.vy, vz: v.vz });
+        const cutoff = now - 1000;
+        while (state.aimBuffer.length && state.aimBuffer[0].t < cutoff) {
+          state.aimBuffer.shift();
+        }
+      }
+    }
   }
   function attachOrientationListener() {
     if (state.orientListenerAttached) return;
@@ -632,22 +683,51 @@
     return { vx, vy, vz };
   }
 
+  function _projectVectorToGround(vx, vy, vz, h) {
+    const sinDown = -vz;
+    if (sinDown <= 0.01)   return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
+    if (sinDown >= 0.9999) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
+    const downAngle = Math.asin(sinDown);
+    const d = h / Math.tan(downAngle);
+    const horizMag = Math.hypot(vx, vy);
+    if (horizMag < 1e-6) return { x: 0, z: 0, d };
+    return { x: d * (vx / horizMag), z: d * (vy / horizMag), d };
+  }
+
   function computeAimGroundPoint() {
     if (!state.haveOrientation) return null;
     const h = parseFloat(camHeightInput.value);
     if (!isFinite(h) || h <= 0) return null;
     const v = getCameraVector();
     if (!v) return null;
+    return _projectVectorToGround(v.vx, v.vy, v.vz, h);
+  }
 
-    const sinDown = -v.vz;
-    if (sinDown <= 0.01)   return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
-    if (sinDown >= 0.9999) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
-
-    const downAngle = Math.asin(sinDown);
-    const d = h / Math.tan(downAngle);
-    const horizMag = Math.hypot(v.vx, v.vy);
-    if (horizMag < 1e-6) return { x: 0, z: 0, d };
-    return { x: d * (v.vx / horizMag), z: d * (v.vy / horizMag), d };
+  /* 최근 windowMs 구간의 카메라 방향 벡터를 평균/정규화 후 지면 좌표 산출.
+     손떨림과 센서 노이즈를 1차로 제거. 마킹 순간에만 사용. */
+  function computeAveragedGroundPoint(windowMs) {
+    if (!state.haveOrientation) return null;
+    const h = parseFloat(camHeightInput.value);
+    if (!isFinite(h) || h <= 0) return null;
+    const now = performance.now();
+    const cutoff = now - (windowMs || 400);
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (let i = state.aimBuffer.length - 1; i >= 0; i--) {
+      const s = state.aimBuffer[i];
+      if (s.t < cutoff) break;
+      sx += s.vx; sy += s.vy; sz += s.vz; n++;
+    }
+    if (n === 0) {
+      // 버퍼가 비었으면 즉시값 fallback
+      return computeAimGroundPoint();
+    }
+    let vx = sx / n, vy = sy / n, vz = sz / n;
+    const mag = Math.hypot(vx, vy, vz);
+    if (mag < 1e-6) return null;
+    vx /= mag; vy /= mag; vz /= mag;
+    const res = _projectVectorToGround(vx, vy, vz, h);
+    if (res && !res.invalid) res.samples = n;
+    return res;
   }
 
   function formatLength(m) {
@@ -805,8 +885,9 @@
     const sa = getScreenAngle();
     const v = getCameraVector();
     const downDeg = v ? (Math.asin(Math.max(-1, Math.min(1, -v.vz))) * 180 / Math.PI) : null;
+    const buf = state.aimBuffer.length;
     debugHUD.textContent =
-      `α=${fmt(alpha)} β=${fmt(beta)} γ=${fmt(gamma)} · screen=${sa}° · down=${fmt(downDeg)}°`;
+      `α=${fmt(alpha)} β=${fmt(beta)} γ=${fmt(gamma)} · screen=${sa}° · down=${fmt(downDeg)}° · buf=${buf}`;
   }
 
   function renderFrame() {
@@ -852,7 +933,7 @@
     if (!detectBusy && video.readyState >= 2) {
       detectBusy = true;
       try {
-        const preds = await state.cocoModel.detect(video, 20, 0.5);
+        const preds = await state.cocoModel.detect(video, 20, state.confidence);
         state.detections = preds;
       } catch (e) {
         console.warn("detect error", e);
@@ -883,6 +964,7 @@
       updateTargetResetBtn();
       // 모드 전환 시 점은 유지하지 않음(거리/측정 간 의미가 달라 혼동 방지)
       state.points = [];
+      state.aimBuffer = [];
       setResult("");
       updateMarkBtn();
       debugBtn.hidden = false;
@@ -917,7 +999,7 @@
       alert("거리 모드는 2점까지입니다. 초기화 후 다시 시도하세요.");
       return;
     }
-    const aim = computeAimGroundPoint();
+    const aim = computeAveragedGroundPoint(400);
     if (!aim || aim.invalid) {
       alert(aim && aim.invalid ? aim.invalid : "유효한 조준 좌표를 계산할 수 없습니다.");
       return;
@@ -975,6 +1057,11 @@
   targetResetBtn.addEventListener("click", () => {
     state.targetClass = null;
     updateTargetResetBtn();
+  });
+  confSlider.addEventListener("input", () => {
+    const v = parseFloat(confSlider.value);
+    state.confidence = v;
+    confValue.textContent = v.toFixed(2);
   });
 
   /* ---------- COCO-SSD ---------- */
