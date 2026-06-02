@@ -150,6 +150,11 @@
     color: var(--accent-ink);
     border-color: transparent;
   }
+  .iconBtn.active {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: transparent;
+  }
 
   .hud {
     position: absolute;
@@ -334,6 +339,7 @@
         <button class="tab active" data-mode="measure" type="button">측정</button>
         <button class="tab" data-mode="count" type="button">개수</button>
       </div>
+      <button class="iconBtn" id="debugBtn" type="button" aria-label="디버그 표시 토글" hidden>⋯</button>
       <button class="iconBtn" id="helpBtn" type="button" aria-label="도움말">?</button>
     </div>
 
@@ -440,6 +446,7 @@
   const toggleDetectBtn = $("toggleDetectBtn");
   const backBtn = $("backBtn");
   const helpBtn = $("helpBtn");
+  const debugBtn = $("debugBtn");
   const openManualBtn = $("openManualBtn");
   const closeManualBtn = $("closeManualBtn");
   const closeManualBtn2 = $("closeManualBtn2");
@@ -455,6 +462,7 @@
     orient: { alpha: null, beta: null, gamma: null },
     haveOrientation: false,
     orientListenerAttached: false,
+    debugVisible: false,
     points: [],
     cocoModel: null,
     detections: [],
@@ -742,8 +750,12 @@
       drawReticle();
       drawMeasureMarkers();
       updateMeasureHUD();
-      debugHUD.hidden = false;
-      updateDebugHUD();
+      if (state.debugVisible) {
+        debugHUD.hidden = false;
+        updateDebugHUD();
+      } else {
+        debugHUD.hidden = true;
+      }
     } else if (state.mode === "count") {
       drawDetections();
       const n = state.detections ? state.detections.length : 0;
@@ -792,16 +804,24 @@
       state.detections = [];
       setResult("");
       updateMarkBtn();
+      debugBtn.hidden = false;
     } else {
       measureControls.hidden = true;
       countControls.hidden = false;
       setResult("");
       ensureCocoModel().then(() => startDetectLoop());
+      debugBtn.hidden = true;
     }
   }
   tabs.forEach((t) => t.addEventListener("click", () => {
     if (state.mode !== t.dataset.mode) applyMode(t.dataset.mode);
   }));
+
+  /* ---------- Debug HUD toggle ---------- */
+  debugBtn.addEventListener("click", () => {
+    state.debugVisible = !state.debugVisible;
+    debugBtn.classList.toggle("active", state.debugVisible);
+  });
 
   /* ---------- Measure controls ---------- */
   function markPoint() {
