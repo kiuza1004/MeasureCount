@@ -568,44 +568,50 @@
     }
   }
 
-  /* ---------- Screen orientation helper ----------
-     event.beta/gamma 는 기기의 물리적 축 기준이라, 화면을 가로로 회전하면
-     pitch 가 gamma 축으로 옮겨간다. screen.orientation.angle 로 보정한다.
-  ----------------------------------------- */
+  /* ---------- Screen angle (debug only) ---------- */
   function getScreenAngle() {
     if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
     if (typeof window.orientation === "number") return window.orientation;
     return 0;
   }
-  function getEffectivePitch() {
-    const { beta, gamma } = state.orient;
-    if (beta === null || beta === undefined) return null;
-    const a = ((getScreenAngle() % 360) + 360) % 360;
-    if (a === 90)  return gamma == null ? null : -gamma;
-    if (a === 180) return -beta;
-    if (a === 270) return gamma == null ? null : gamma;
-    return beta;
+
+  /* ---------- Camera direction from raw α/β/γ ----------
+     화면 회전 잠금 단말(MIUI 등)에서 screen.orientation.angle 이 변하지 않아도
+     기기 자체 자세(α/β/γ)는 그대로 갱신된다. 따라서 화면 회전 정보 없이
+     ZXY 오일러 회전 R = R_z(α)·R_x(β)·R_y(γ) 만으로 후면카메라 방향
+     v = R·(0,0,-1) 을 직접 계산한다.
+     - 지평선 아래 내려간 각도: downAngle = asin(-v.z) = asin(cos(β)·cos(γ))
+     - 지면 위 조준점 방향: 수평 성분 (v.x, v.y) 정규화
+  ----------------------------------------- */
+  function getCameraVector() {
+    const { alpha, beta, gamma } = state.orient;
+    if (alpha === null || beta === null || gamma === null) return null;
+    const a = deg2rad(alpha), b = deg2rad(beta), g = deg2rad(gamma);
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const cb = Math.cos(b), sb = Math.sin(b);
+    const cg = Math.cos(g), sg = Math.sin(g);
+    const vx = -ca * sg - sa * sb * cg;
+    const vy = -sa * sg + ca * sb * cg;
+    const vz = -cb * cg;
+    return { vx, vy, vz };
   }
 
-  /* ---------- Measurement math ----------
-     d (수평거리) = h / tan(pitch - 90°). pitch 는 화면 회전 보정된 값.
-     Ground point (x,z) = (d*sinα, d*cosα), α = compass heading.
-  ----------------------------------------- */
   function computeAimGroundPoint() {
     if (!state.haveOrientation) return null;
     const h = parseFloat(camHeightInput.value);
     if (!isFinite(h) || h <= 0) return null;
-    const pitch = getEffectivePitch();
-    const alpha = state.orient.alpha;
-    if (pitch === null || alpha === null) return null;
+    const v = getCameraVector();
+    if (!v) return null;
 
-    const tiltDeg = pitch - 90;
-    if (tiltDeg <= 0.5) return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
-    if (tiltDeg >= 89.5) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
+    const sinDown = -v.vz;
+    if (sinDown <= 0.01)   return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
+    if (sinDown >= 0.9999) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
 
-    const d = h / Math.tan(deg2rad(tiltDeg));
-    const a = deg2rad(alpha || 0);
-    return { x: d * Math.sin(a), z: d * Math.cos(a), d };
+    const downAngle = Math.asin(sinDown);
+    const d = h / Math.tan(downAngle);
+    const horizMag = Math.hypot(v.vx, v.vy);
+    if (horizMag < 1e-6) return { x: 0, z: 0, d };
+    return { x: d * (v.vx / horizMag), z: d * (v.vy / horizMag), d };
   }
 
   function formatLength(m) {
@@ -723,8 +729,10 @@
     const fmt = (v) => (v === null || v === undefined || !isFinite(v)) ? "—" : v.toFixed(1);
     const { alpha, beta, gamma } = state.orient;
     const sa = getScreenAngle();
-    const pitch = getEffectivePitch();
-    debugHUD.textContent = `α=${fmt(alpha)} β=${fmt(beta)} γ=${fmt(gamma)} · screen=${sa}° · pitch=${fmt(pitch)}°`;
+    const v = getCameraVector();
+    const downDeg = v ? (Math.asin(Math.max(-1, Math.min(1, -v.vz))) * 180 / Math.PI) : null;
+    debugHUD.textContent =
+      `α=${fmt(alpha)} β=${fmt(beta)} γ=${fmt(gamma)} · screen=${sa}° · down=${fmt(downDeg)}°`;
   }
 
   function renderFrame() {
