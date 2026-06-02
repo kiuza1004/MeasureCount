@@ -173,6 +173,13 @@
   }
   .pill.warn { color: #ffd591; border-color: rgba(245,158,11,0.35); }
   .pill.bad  { color: #ffb4b4; border-color: rgba(239,68,68,0.35); }
+  .pill.debug {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #b8f5d4;
+    border-color: rgba(52,211,153,0.25);
+    letter-spacing: 0.02em;
+  }
 
   .controls {
     position: absolute;
@@ -333,6 +340,7 @@
     <div class="hud">
       <div class="pill" id="statusPill">준비 중…</div>
       <div class="pill" id="resultPill" hidden></div>
+      <div class="pill debug" id="debugHUD" hidden></div>
     </div>
 
     <!-- Measure controls -->
@@ -420,6 +428,7 @@
   const tabs = appScreen.querySelectorAll(".tab");
   const statusPill = $("statusPill");
   const resultPill = $("resultPill");
+  const debugHUD = $("debugHUD");
   const loader = $("loader");
   const loaderText = $("loaderText");
   const measureControls = $("measureControls");
@@ -559,19 +568,38 @@
     }
   }
 
+  /* ---------- Screen orientation helper ----------
+     event.beta/gamma 는 기기의 물리적 축 기준이라, 화면을 가로로 회전하면
+     pitch 가 gamma 축으로 옮겨간다. screen.orientation.angle 로 보정한다.
+  ----------------------------------------- */
+  function getScreenAngle() {
+    if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
+    if (typeof window.orientation === "number") return window.orientation;
+    return 0;
+  }
+  function getEffectivePitch() {
+    const { beta, gamma } = state.orient;
+    if (beta === null || beta === undefined) return null;
+    const a = ((getScreenAngle() % 360) + 360) % 360;
+    if (a === 90)  return gamma == null ? null : -gamma;
+    if (a === 180) return -beta;
+    if (a === 270) return gamma == null ? null : gamma;
+    return beta;
+  }
+
   /* ---------- Measurement math ----------
-     d (수평거리) = h / tan(β - 90°), where β is device pitch in degrees.
+     d (수평거리) = h / tan(pitch - 90°). pitch 는 화면 회전 보정된 값.
      Ground point (x,z) = (d*sinα, d*cosα), α = compass heading.
   ----------------------------------------- */
   function computeAimGroundPoint() {
     if (!state.haveOrientation) return null;
     const h = parseFloat(camHeightInput.value);
     if (!isFinite(h) || h <= 0) return null;
-    const beta = state.orient.beta;
+    const pitch = getEffectivePitch();
     const alpha = state.orient.alpha;
-    if (beta === null || alpha === null) return null;
+    if (pitch === null || alpha === null) return null;
 
-    const tiltDeg = beta - 90;
+    const tiltDeg = pitch - 90;
     if (tiltDeg <= 0.5) return { invalid: "수평선 위쪽을 가리키고 있습니다. 지면을 향하도록 기울이세요." };
     if (tiltDeg >= 89.5) return { invalid: "거의 수직 아래쪽입니다. 약간 더 멀리 향하세요." };
 
@@ -691,6 +719,14 @@
     ctx.restore();
   }
 
+  function updateDebugHUD() {
+    const fmt = (v) => (v === null || v === undefined || !isFinite(v)) ? "—" : v.toFixed(1);
+    const { alpha, beta, gamma } = state.orient;
+    const sa = getScreenAngle();
+    const pitch = getEffectivePitch();
+    debugHUD.textContent = `α=${fmt(alpha)} β=${fmt(beta)} γ=${fmt(gamma)} · screen=${sa}° · pitch=${fmt(pitch)}°`;
+  }
+
   function renderFrame() {
     if (!state.running) { state.rafId = null; return; }
     ctx.clearRect(0, 0, state.cssW, state.cssH);
@@ -698,10 +734,13 @@
       drawReticle();
       drawMeasureMarkers();
       updateMeasureHUD();
+      debugHUD.hidden = false;
+      updateDebugHUD();
     } else if (state.mode === "count") {
       drawDetections();
       const n = state.detections ? state.detections.length : 0;
       setStatus(`탐지된 사물 수: ${n}`);
+      debugHUD.hidden = true;
     }
     state.rafId = requestAnimationFrame(renderFrame);
   }
