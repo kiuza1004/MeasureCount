@@ -135,7 +135,7 @@
     display: flex; gap: 6px; justify-content: center;
   }
   .tab {
-    padding: 8px 12px;
+    padding: 8px 10px;
     font-size: 13px; font-weight: 600;
     color: #ddd;
     background: var(--panel);
@@ -233,6 +233,20 @@
     text-align: right;
     outline: none;
   }
+  .fieldBtn {
+    flex-shrink: 0;
+    padding: 0 10px;
+    height: 30px;
+    background: rgba(255,255,255,0.08);
+    color: #e5e7eb;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .fieldBtn:active { transform: scale(0.96); }
 
   /* ===================== Manual modal ===================== */
   #manualModal {
@@ -311,13 +325,17 @@
     </div>
 
     <div class="modeList">
-      <button class="modeCard accent" data-mode="measure" type="button">
-        <div class="t">거리/넓이 측정</div>
-        <div class="d">기기 기울기 + 카메라 높이로 지면 위 두 점 사이 거리/다각형 넓이를 추정합니다.</div>
+      <button class="modeCard accent" data-mode="distance" type="button">
+        <div class="t">거리만 측정</div>
+        <div class="d">두 점 사이 직선 거리만 빠르게 계산하는 단순 모드.</div>
+      </button>
+      <button class="modeCard" data-mode="measure" type="button">
+        <div class="t">거리·넓이 측정</div>
+        <div class="d">두 점이면 거리, 세 점 이상이면 다각형 넓이/둘레까지 계산.</div>
       </button>
       <button class="modeCard" data-mode="count" type="button">
         <div class="t">물건 개수 세기</div>
-        <div class="d">화면에 보이는 사물을 AI(COCO-SSD)로 자동 탐지·박스 표시·실시간 카운팅.</div>
+        <div class="d">AI(COCO-SSD) 자동 탐지. 가운데 조준점으로 셀 대상을 지정합니다.</div>
       </button>
     </div>
 
@@ -336,6 +354,7 @@
     <div class="topBar">
       <button class="iconBtn" id="backBtn" type="button" aria-label="뒤로">‹</button>
       <div class="tabs">
+        <button class="tab" data-mode="distance" type="button">거리</button>
         <button class="tab active" data-mode="measure" type="button">측정</button>
         <button class="tab" data-mode="count" type="button">개수</button>
       </div>
@@ -355,6 +374,8 @@
         <div class="field">
           <label>높이(m)</label>
           <input id="camHeight" type="number" step="0.05" min="0.3" max="3" value="1.50" inputmode="decimal" />
+          <button class="fieldBtn" id="heightDefaultBtn" type="button" title="1.50m 로 되돌리기">기본</button>
+          <button class="fieldBtn" id="heightClearBtn" type="button" aria-label="지우기">✕</button>
         </div>
         <button class="btn ghost" id="orientPermBtn" type="button" hidden>기울기 권한</button>
       </div>
@@ -367,6 +388,7 @@
     <!-- Count controls -->
     <div class="controls" id="countControls" hidden>
       <div class="row">
+        <button class="btn primary" id="targetResetBtn" type="button" hidden>대상 해제</button>
         <button class="btn" id="toggleDetectBtn" type="button">탐지 일시정지</button>
       </div>
     </div>
@@ -380,26 +402,28 @@
         <button class="iconBtn" id="closeManualBtn" type="button" aria-label="닫기" style="width:34px;height:34px;font-size:16px;">×</button>
       </div>
       <div class="modalBody">
-        <h3>1. 거리/넓이 측정</h3>
+        <h3>1. 거리만 측정</h3>
         <ol>
-          <li><b>카메라 높이(m)</b>에 지면에서 카메라 렌즈까지의 높이를 입력합니다(기본 1.50m).</li>
-          <li>카메라를 지면 방향으로 기울여 화면 중앙 <b>조준점</b>을 측정할 위치에 정확히 맞춥니다.</li>
-          <li><b>시작점 찍기</b> 버튼 또는 화면을 탭하여 첫 점을 기록합니다.</li>
-          <li>같은 방법으로 두 번째 점을 찍으면 <b>거리</b>가 표시됩니다.</li>
-          <li>세 점 이상 찍으면 <b>다각형 넓이·둘레</b>가 표시됩니다.</li>
-          <li><b>초기화</b>로 점을 모두 지우고 다시 시작합니다.</li>
+          <li><b>높이(m)</b>에 지면~카메라 렌즈 높이를 입력합니다(기본 1.50m). <b>기본</b>/<b>✕</b> 버튼으로 빠르게 되돌리거나 비울 수 있습니다.</li>
+          <li>카메라를 기울여 화면 중앙 <b>조준점</b>을 측정할 위치에 맞추고 탭/버튼으로 두 점을 찍습니다.</li>
+          <li>두 점이 찍히면 직선 거리가 표시되고 추가 점은 받지 않습니다. <b>초기화</b> 후 재측정.</li>
         </ol>
-        <div class="note">iOS Safari는 첫 진입 시 화면의 <b>"기울기 권한"</b> 버튼을 한 번 눌러야 측정이 활성화됩니다. 평평한 바닥, 흔들리지 않는 자세에서 가장 정확합니다.</div>
 
-        <h3>2. 물건 개수 세기</h3>
+        <h3>2. 거리·넓이 측정</h3>
         <ol>
-          <li>탭에서 <b>개수</b>를 선택합니다. 최초 1회 AI 모델이 로딩됩니다(수 초).</li>
-          <li>카메라를 사물에 향하면 자동으로 <b>박스·라벨·총 개수</b>가 표시됩니다.</li>
-          <li>필요 시 <b>탐지 일시정지</b>로 잠시 멈추거나 재개할 수 있습니다.</li>
+          <li>거리 모드와 동일한 방식으로 점을 찍습니다. 두 점이면 <b>거리</b>, 세 점 이상이면 <b>다각형 넓이·둘레</b> 가 표시됩니다.</li>
         </ol>
-        <div class="note">사용 모델: COCO-SSD (80개 일반 사물 클래스). 작거나 겹친 사물, 조명이 어두운 환경에서는 탐지율이 낮아질 수 있습니다.</div>
+        <div class="note">iOS Safari는 첫 진입 시 <b>"기울기 권한"</b> 버튼을 한 번 눌러야 측정이 활성화됩니다. 평평한 바닥, 흔들리지 않는 자세에서 가장 정확합니다.</div>
 
-        <h3>3. 권한 및 보안</h3>
+        <h3>3. 물건 개수 세기</h3>
+        <ol>
+          <li>최초 1회 AI 모델 로딩(수 초) 후 화면의 사물에 <b>박스·라벨</b>이 표시됩니다.</li>
+          <li>화면 중앙 <b>조준점</b>을 셀 대상에 맞추고 <b>탭</b>하면 그 클래스로 잠겨 같은 종류만 카운트됩니다.</li>
+          <li><b>대상 해제</b>로 잠금을 풀거나, <b>탐지 일시정지</b>로 멈출 수 있습니다.</li>
+        </ol>
+        <div class="note">사용 모델: COCO-SSD (80개 일반 사물 클래스). 작거나 겹친 사물, 어두운 환경에서는 탐지율이 떨어질 수 있습니다.</div>
+
+        <h3>4. 권한 및 보안</h3>
         <ul>
           <li>카메라와 기기 기울기(DeviceOrientation) 권한이 필요합니다.</li>
           <li>영상·계산은 모두 기기 내부(온디바이스)에서 동작하며 서버로 전송되지 않습니다.</li>
@@ -440,10 +464,13 @@
   const measureControls = $("measureControls");
   const countControls = $("countControls");
   const camHeightInput = $("camHeight");
+  const heightDefaultBtn = $("heightDefaultBtn");
+  const heightClearBtn = $("heightClearBtn");
   const markBtn = $("markBtn");
   const resetBtn = $("resetBtn");
   const orientPermBtn = $("orientPermBtn");
   const toggleDetectBtn = $("toggleDetectBtn");
+  const targetResetBtn = $("targetResetBtn");
   const backBtn = $("backBtn");
   const helpBtn = $("helpBtn");
   const debugBtn = $("debugBtn");
@@ -455,7 +482,7 @@
 
   /* ---------- State ---------- */
   const state = {
-    mode: null,                       // "measure" | "count" | null (not running)
+    mode: null,                       // "distance" | "measure" | "count" | null
     running: false,                   // app screen active
     stream: null,
     cssW: 0, cssH: 0, dpr: 1,
@@ -467,6 +494,7 @@
     cocoModel: null,
     detections: [],
     detecting: true,
+    targetClass: null,               // count 모드에서 잠근 대상 클래스
     rafId: null,
     detectTimer: null,
   };
@@ -648,23 +676,24 @@
       setStatus(`조준 거리 ≈ ${formatLength(aim.d)}`);
     }
 
-    if (state.points.length === 0) {
+    const n = state.points.length;
+    if (n === 0) {
       setResult("");
-    } else if (state.points.length === 1) {
+    } else if (n === 1) {
       setResult("시작점 설정됨. 다음 점을 조준하고 버튼/탭으로 찍으세요.");
-    } else if (state.points.length === 2) {
+    } else if (n === 2) {
       const [a, b] = state.points;
       const dist = Math.hypot(a.x - b.x, a.z - b.z);
       setResult(`거리: ${formatLength(dist)}`);
     } else {
       const area = polygonArea(state.points);
       let perim = 0;
-      for (let i = 0; i < state.points.length; i++) {
+      for (let i = 0; i < n; i++) {
         const a = state.points[i];
-        const b = state.points[(i + 1) % state.points.length];
+        const b = state.points[(i + 1) % n];
         perim += Math.hypot(a.x - b.x, a.z - b.z);
       }
-      setResult(`넓이: ${area.toFixed(2)} m² · 둘레: ${formatLength(perim)} (${state.points.length}점)`);
+      setResult(`넓이: ${area.toFixed(2)} m² · 둘레: ${formatLength(perim)} (${n}점)`);
     }
   }
 
@@ -703,31 +732,68 @@
     });
   }
 
-  function drawDetections() {
-    if (!state.detections || state.detections.length === 0) return;
+  function getDetectionTransform() {
     const vw = video.videoWidth, vh = video.videoHeight;
-    if (!vw || !vh) return;
+    if (!vw || !vh) return null;
     const cw = state.cssW, ch = state.cssH;
     const scale = Math.max(cw / vw, ch / vh);
-    const dw = vw * scale, dh = vh * scale;
-    const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+    const ox = (cw - vw * scale) / 2;
+    const oy = (ch - vh * scale) / 2;
+    return { scale, ox, oy };
+  }
+
+  function getDetectionUnderCenter() {
+    if (!state.detections || state.detections.length === 0) return null;
+    const tf = getDetectionTransform();
+    if (!tf) return null;
+    const cx = state.cssW / 2, cy = state.cssH / 2;
+    let best = null;
+    let bestArea = Infinity;
+    for (const d of state.detections) {
+      const [x, y, w, h] = d.bbox;
+      const sx = x * tf.scale + tf.ox;
+      const sy = y * tf.scale + tf.oy;
+      const sw = w * tf.scale, sh = h * tf.scale;
+      if (cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh) {
+        const area = sw * sh;
+        if (area < bestArea) { best = d; bestArea = area; }
+      }
+    }
+    return best;
+  }
+
+  function drawDetections() {
+    if (!state.detections || state.detections.length === 0) return;
+    const tf = getDetectionTransform();
+    if (!tf) return;
+
+    const candidate = state.targetClass ? null : getDetectionUnderCenter();
 
     ctx.save();
-    ctx.lineWidth = 2;
     ctx.font = "bold 13px sans-serif";
     ctx.textBaseline = "top";
     state.detections.forEach((d) => {
+      const isLocked   = state.targetClass && d.class === state.targetClass;
+      const isCandidate = candidate && d === candidate;
+      const isHighlight = isLocked || isCandidate;
+
+      // 대상 잠금 상태에서는 잠근 클래스만 표시
+      if (state.targetClass && !isLocked) return;
+
       const [x, y, w, h] = d.bbox;
-      const sx = x * scale + ox;
-      const sy = y * scale + oy;
-      const sw = w * scale, sh = h * scale;
-      ctx.strokeStyle = "rgba(52, 211, 153, 0.95)";
+      const sx = x * tf.scale + tf.ox;
+      const sy = y * tf.scale + tf.oy;
+      const sw = w * tf.scale, sh = h * tf.scale;
+
+      ctx.lineWidth = isHighlight ? 3 : 2;
+      ctx.strokeStyle = isHighlight ? "rgba(245, 158, 11, 0.95)" : "rgba(52, 211, 153, 0.95)";
       ctx.strokeRect(sx, sy, sw, sh);
+
       const label = `${d.class} ${(d.score * 100).toFixed(0)}%`;
       const tw = ctx.measureText(label).width + 8;
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fillRect(sx, Math.max(0, sy - 18), tw, 18);
-      ctx.fillStyle = "#34d399";
+      ctx.fillStyle = isHighlight ? "#fbbf24" : "#34d399";
       ctx.fillText(label, sx + 4, Math.max(0, sy - 16));
     });
     ctx.restore();
@@ -746,7 +812,7 @@
   function renderFrame() {
     if (!state.running) { state.rafId = null; return; }
     ctx.clearRect(0, 0, state.cssW, state.cssH);
-    if (state.mode === "measure") {
+    if (state.mode === "measure" || state.mode === "distance") {
       drawReticle();
       drawMeasureMarkers();
       updateMeasureHUD();
@@ -758,8 +824,19 @@
       }
     } else if (state.mode === "count") {
       drawDetections();
-      const n = state.detections ? state.detections.length : 0;
-      setStatus(`탐지된 사물 수: ${n}`);
+      drawReticle();
+      if (state.targetClass) {
+        const n = state.detections.filter((d) => d.class === state.targetClass).length;
+        setStatus(`대상: ${state.targetClass} · ${n}개`);
+      } else {
+        const candidate = getDetectionUnderCenter();
+        const total = state.detections ? state.detections.length : 0;
+        if (candidate) {
+          setStatus(`조준: ${candidate.class} — 탭하여 대상 지정 (전체 ${total}개)`);
+        } else {
+          setStatus(`대상 미지정 — 사물에 조준 후 탭 (전체 ${total}개)`, "warn");
+        }
+      }
       debugHUD.hidden = true;
     }
     state.rafId = requestAnimationFrame(renderFrame);
@@ -798,19 +875,25 @@
   function applyMode(mode) {
     state.mode = mode;
     tabs.forEach((t) => t.classList.toggle("active", t.dataset.mode === mode));
-    if (mode === "measure") {
+    if (mode === "measure" || mode === "distance") {
       measureControls.hidden = false;
       countControls.hidden = true;
       state.detections = [];
+      state.targetClass = null;
+      updateTargetResetBtn();
+      // 모드 전환 시 점은 유지하지 않음(거리/측정 간 의미가 달라 혼동 방지)
+      state.points = [];
       setResult("");
       updateMarkBtn();
       debugBtn.hidden = false;
     } else {
       measureControls.hidden = true;
       countControls.hidden = false;
+      state.points = [];
       setResult("");
       ensureCocoModel().then(() => startDetectLoop());
       debugBtn.hidden = true;
+      updateTargetResetBtn();
     }
   }
   tabs.forEach((t) => t.addEventListener("click", () => {
@@ -825,9 +908,13 @@
 
   /* ---------- Measure controls ---------- */
   function markPoint() {
-    if (state.mode !== "measure") return;
+    if (state.mode !== "measure" && state.mode !== "distance") return;
     if (!state.haveOrientation) {
       alert("기기 방향 데이터를 사용할 수 없습니다. 권한을 허용했는지 확인하세요.");
+      return;
+    }
+    if (state.mode === "distance" && state.points.length >= 2) {
+      alert("거리 모드는 2점까지입니다. 초기화 후 다시 시도하세요.");
       return;
     }
     const aim = computeAimGroundPoint();
@@ -840,6 +927,12 @@
   }
   function updateMarkBtn() {
     const n = state.points.length;
+    if (state.mode === "distance") {
+      if (n === 0) markBtn.textContent = "시작점 찍기";
+      else if (n === 1) markBtn.textContent = "끝점 찍기 (거리)";
+      else markBtn.textContent = "2점 완료 — 초기화 후 재측정";
+      return;
+    }
     if (n === 0) markBtn.textContent = "시작점 찍기";
     else if (n === 1) markBtn.textContent = "끝점 찍기 (거리)";
     else markBtn.textContent = `점 추가 (현재 ${n}개·넓이)`;
@@ -850,15 +943,38 @@
     updateMarkBtn();
     setResult("");
   });
+  heightDefaultBtn.addEventListener("click", () => {
+    camHeightInput.value = "1.50";
+  });
+  heightClearBtn.addEventListener("click", () => {
+    camHeightInput.value = "";
+    camHeightInput.focus();
+  });
   touchLayer.addEventListener("click", () => {
-    if (state.mode === "measure") markPoint();
+    if (state.mode === "measure" || state.mode === "distance") {
+      markPoint();
+    } else if (state.mode === "count") {
+      if (state.targetClass) return;  // 이미 잠금 — 해제는 버튼으로
+      const t = getDetectionUnderCenter();
+      if (t) {
+        state.targetClass = t.class;
+        updateTargetResetBtn();
+      }
+    }
   });
 
   /* ---------- Count controls ---------- */
+  function updateTargetResetBtn() {
+    targetResetBtn.hidden = !state.targetClass;
+  }
   toggleDetectBtn.addEventListener("click", () => {
     state.detecting = !state.detecting;
     toggleDetectBtn.textContent = state.detecting ? "탐지 일시정지" : "탐지 재개";
     if (!state.detecting) state.detections = [];
+  });
+  targetResetBtn.addEventListener("click", () => {
+    state.targetClass = null;
+    updateTargetResetBtn();
   });
 
   /* ---------- COCO-SSD ---------- */
